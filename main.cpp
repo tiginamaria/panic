@@ -12,42 +12,41 @@
 
 const size_t BLOCK_SIZE = 256;
 
-void prop_hillis_steele(uint array_size, double* input, double *chunks, cl::Context context, cl::CommandQueue queue, cl::Program program) {
-    cl::Kernel kernel_prop(program, "prop_scan_hillis_steele");
+
+void prop_hillis_steele(uint array_size, double* input, double *chunks, cl::Context& context, cl::CommandQueue& queue, cl::Program& program) {
+    cl::Kernel kernel_prop(program, "prop_hillis_steele");
     cl::Buffer dev_input (context, CL_MEM_READ_WRITE, sizeof(double) * array_size);
     cl::Buffer dev_chunks (context, CL_MEM_READ_ONLY, sizeof(double) * array_size / BLOCK_SIZE);
     // copy from cpu to gpu
-    queue.enqueueWriteBuffer(dev_input, CL_TRUE, 0, sizeof(double ) * array_size, &input[0]);
-    queue.enqueueWriteBuffer(dev_input, CL_TRUE, 0, sizeof(double ) * array_size, &chunks[0]);
+    queue.enqueueWriteBuffer(dev_input, CL_TRUE, 0, sizeof(double) * array_size, &input[0]);
+    queue.enqueueWriteBuffer(dev_chunks, CL_TRUE, 0, sizeof(double) * array_size / BLOCK_SIZE, &chunks[0]);
 
     kernel_prop.setArg(0, dev_input);
-    kernel_prop.setArg(1, array_size);
-    kernel_prop.setArg(2, dev_chunks);
+    kernel_prop.setArg(1, dev_chunks);
 
-    queue.enqueueNDRangeKernel(kernel_prop, cl::NullRange,cl::NDRange(array_size), cl::NDRange(BLOCK_SIZE));
-
+    queue.enqueueNDRangeKernel(kernel_prop, cl::NullRange, cl::NDRange(array_size), cl::NDRange(BLOCK_SIZE));
     queue.enqueueReadBuffer(dev_input, CL_TRUE, 0, sizeof(double) * array_size, &input[0]);
 }
 
-void scan_hillis_steele(uint array_size, double* input, double *output, cl::Context context, cl::CommandQueue queue, cl::Program program) {
+void scan_hillis_steele(uint array_size, double* input, double *output, cl::Context& context, cl::CommandQueue& queue, cl::Program& program) {
 
     // allocate device buffer to hold message
     cl::Buffer dev_input (context, CL_MEM_READ_ONLY, sizeof(double) * array_size);
-    cl::Buffer dev_output(context, CL_MEM_WRITE_ONLY, sizeof(double) * array_size);
+    cl::Buffer dev_output(context, CL_MEM_READ_WRITE, sizeof(double) * array_size);
 
     // copy from cpu to gpu
     queue.enqueueWriteBuffer(dev_input, CL_TRUE, 0, sizeof(double ) * array_size, &input[0]);
 
     // load named kernel from opencl source
-    cl::Kernel kernel_hs(program, "scan_hillis_steele");
-    kernel_hs.setArg(0, dev_input);
-    kernel_hs.setArg(1, dev_output);
-    kernel_hs.setArg(2, cl::Local(sizeof(double) * BLOCK_SIZE));
-    kernel_hs.setArg(3, cl::Local(sizeof(double) * BLOCK_SIZE));
-    queue.enqueueNDRangeKernel(kernel_hs, cl::NullRange, cl::NDRange(array_size), cl::NDRange(BLOCK_SIZE));
+    cl::Kernel kernel_scan(program, "scan_hillis_steele");
+    kernel_scan.setArg(0, dev_input);
+    kernel_scan.setArg(1, dev_output);
+    kernel_scan.setArg(2, cl::Local(sizeof(double) * BLOCK_SIZE));
+    kernel_scan.setArg(3, cl::Local(sizeof(double) * BLOCK_SIZE));
+    queue.enqueueNDRangeKernel(kernel_scan, cl::NullRange, cl::NDRange(array_size), cl::NDRange(BLOCK_SIZE));
 
     // get output
-    queue.enqueueReadBuffer(dev_output, CL_TRUE, 0, sizeof(int) * array_size, &output[0]);
+    queue.enqueueReadBuffer(dev_output, CL_TRUE, 0, sizeof(double) * array_size, &output[0]);
 
     // recursive call
 
@@ -56,13 +55,12 @@ void scan_hillis_steele(uint array_size, double* input, double *output, cl::Cont
         uint round_new_array_size = ceil((double)new_array_size / BLOCK_SIZE) * BLOCK_SIZE;
         double new_input[round_new_array_size];
         for (int i = 0; i < new_array_size; i++) {
-            new_input[i] = input[i * BLOCK_SIZE];
+            new_input[i] = output[(i + 1) * BLOCK_SIZE - 1];
         }
         double new_output[round_new_array_size];
-        scan_hillis_steele(new_array_size, new_input, new_output, context, queue, program);
-        prop_hillis_steele(array_size, input, new_output, context, queue, program);
+        scan_hillis_steele(round_new_array_size, new_input, new_output, context, queue, program);
+        prop_hillis_steele(array_size, output, new_output, context, queue, program);
     }
-    prop_hillis_steele(array_size, input, output, context, queue, program);
 }
 
 
@@ -104,29 +102,19 @@ int main()
             return 0;
         }
 
-//        uint array_size;
-//        std::ifstream infile("../input.txt", std::ios_base::in);
-//        infile >> array_size;
-//
-//        uint round_array_size = ceil((double)array_size / BLOCK_SIZE) * BLOCK_SIZE;
-//
-//        double input[round_array_size];
-//        for (size_t i = 0; i < array_size; ++i) {
-//            infile >> input[i];
-//        }
-
-        uint array_size = 1000;
+        uint array_size;
+        std::ifstream infile("../input.txt", std::ios_base::in);
+        infile >> array_size;
 
         uint round_array_size = ceil((double)array_size / BLOCK_SIZE) * BLOCK_SIZE;
 
         double input[round_array_size];
         for (size_t i = 0; i < array_size; ++i) {
-            input[i] = 1;
+            infile >> input[i];
         }
 
-
         double output[round_array_size];
-        scan_hillis_steele(array_size, input, output, context, queue, program);
+        scan_hillis_steele(round_array_size, input, output, context, queue, program);
         std::ofstream outfile("../output.txt");
         for (size_t i = 0; i < array_size; ++i)
         {
